@@ -3,16 +3,16 @@
  * Plugin Name: Catálogo de Mídia Pessoal
  * Plugin URI: https://casagrande.dev
  * Description: Cadastre filmes, livros e séries como posts convencionais (usando os templates padrão do seu tema), avalie com nota e sentimento final, e exiba na sidebar o que está sendo lido/assistido no momento.
- * Version: 1.0.0
- * Author: Seu Site
+ * Version: 1.1.0
+ * Author: https://casagrande.dev
  * Text Domain: catalogo-midia-pessoal
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
-	exit; // Acesso direto negado.
+	exit; 
 }
 
-define( 'CMP_VERSION', '1.0.0' );
+define( 'CMP_VERSION', '1.1.0' );
 define( 'CMP_POST_TYPE', 'cmp_midia' );
 define( 'CMP_TAXONOMY', 'cmp_tipo' );
 
@@ -20,11 +20,12 @@ define( 'CMP_TAXONOMY', 'cmp_tipo' );
  * ===========================================================
  * 1. REGISTRO DO CUSTOM POST TYPE 
  * ===========================================================
-
  */
 function cmp_registrar_tamanho_imagem() {
-	// Tamanho retrato (estilo capa de livro / pôster) usado no widget de sidebar.
+
 	add_image_size( 'cmp_capa_retrato', 60, 90, true );
+
+	add_image_size( 'cmp_capa_conteudo', 140, 200, true );
 }
 add_action( 'after_setup_theme', 'cmp_registrar_tamanho_imagem' );
 
@@ -108,7 +109,7 @@ function cmp_register_taxonomy() {
 add_action( 'init', 'cmp_register_taxonomy' );
 
 /**
- * Cria os termos padrão (Filme, Livro, Série) na ativação do plugin.
+ * Cria os termos padrão (Filme, Livro, Série) 
  */
 function cmp_activate_plugin() {
 	cmp_register_post_type();
@@ -119,6 +120,10 @@ function cmp_activate_plugin() {
 		if ( ! term_exists( $termo, CMP_TAXONOMY ) ) {
 			wp_insert_term( $termo, CMP_TAXONOMY );
 		}
+	}
+
+	if ( false === get_option( 'cmp_posicao_avaliacao' ) ) {
+		add_option( 'cmp_posicao_avaliacao', 'depois' );
 	}
 
 	flush_rewrite_rules();
@@ -270,17 +275,77 @@ add_action( 'save_post_' . CMP_POST_TYPE, 'cmp_salvar_meta_box' );
 
 /**
  * ===========================================================
- * 4. EXIBIÇÃO NO CONTEÚDO (sem precisar de template próprio)
+ * 4. PÁGINA DE CONFIGURAÇÕES (posição da caixa de avaliação)
  * ===========================================================
- * Insere a caixa de avaliação automaticamente no início do
- * conteúdo, dentro do template padrão do tema.
  */
-function cmp_exibir_avaliacao_no_conteudo( $content ) {
-	if ( ! is_singular( CMP_POST_TYPE ) || ! in_the_loop() || ! is_main_query() ) {
-		return $content;
-	}
+function cmp_registrar_configuracoes() {
+	register_setting(
+		'cmp_configuracoes_grupo',
+		'cmp_posicao_avaliacao',
+		array(
+			'type'              => 'string',
+			'sanitize_callback' => function( $valor ) {
+				return in_array( $valor, array( 'antes', 'depois' ), true ) ? $valor : 'depois';
+			},
+			'default'           => 'depois',
+		)
+	);
+}
+add_action( 'admin_init', 'cmp_registrar_configuracoes' );
 
-	$post_id     = get_the_ID();
+function cmp_adicionar_pagina_configuracoes() {
+	add_submenu_page(
+		'edit.php?post_type=' . CMP_POST_TYPE,
+		'Configurações do Catálogo',
+		'Configurações',
+		'manage_options',
+		'cmp-configuracoes',
+		'cmp_renderizar_pagina_configuracoes'
+	);
+}
+add_action( 'admin_menu', 'cmp_adicionar_pagina_configuracoes' );
+
+function cmp_renderizar_pagina_configuracoes() {
+	$posicao_atual = get_option( 'cmp_posicao_avaliacao', 'depois' );
+	?>
+	<div class="wrap">
+		<h1>Configurações do Catálogo de Mídia</h1>
+		<form method="post" action="options.php">
+			<?php settings_fields( 'cmp_configuracoes_grupo' ); ?>
+			<table class="form-table">
+				<tr>
+					<th scope="row">Posição da caixa de avaliação</th>
+					<td>
+						<label>
+							<input type="radio" name="cmp_posicao_avaliacao" value="antes"
+								<?php checked( $posicao_atual, 'antes' ); ?>>
+							Antes do conteúdo do post
+						</label>
+						<br>
+						<label>
+							<input type="radio" name="cmp_posicao_avaliacao" value="depois"
+								<?php checked( $posicao_atual, 'depois' ); ?>>
+							Depois do conteúdo do post
+						</label>
+						<p class="description">Define onde a capa, nota, sentimento e status do item aparecem em relação ao conteúdo do post.</p>
+					</td>
+				</tr>
+			</table>
+			<?php submit_button( 'Salvar Configurações' ); ?>
+		</form>
+	</div>
+	<?php
+}
+
+/**
+ * ===========================================================
+ * 5. EXIBIÇÃO NO CONTEÚDO (sem precisar de template próprio)
+ * ===========================================================
+ * Insere a caixa de avaliação (com capa) antes ou depois do
+ * conteúdo, dentro do template padrão do tema, conforme a
+ * configuração escolhida em Catálogo de Mídia > Configurações.
+ */
+function cmp_montar_caixa_avaliacao( $post_id ) {
 	$nota        = get_post_meta( $post_id, '_cmp_nota', true );
 	$sentimento  = get_post_meta( $post_id, '_cmp_sentimento', true );
 	$status      = get_post_meta( $post_id, '_cmp_status', true );
@@ -293,36 +358,58 @@ function cmp_exibir_avaliacao_no_conteudo( $content ) {
 	ob_start();
 	?>
 	<div class="cmp-avaliacao-box">
-		<?php if ( '' !== $nota ) : ?>
-			<span class="cmp-nota">⭐ Nota: <strong><?php echo esc_html( $nota ); ?>/10</strong></span>
+		<?php if ( has_post_thumbnail( $post_id ) ) : ?>
+			<div class="cmp-avaliacao-capa">
+				<?php echo get_the_post_thumbnail( $post_id, 'cmp_capa_conteudo' ); ?>
+			</div>
 		<?php endif; ?>
 
-		<?php if ( ! empty( $sentimento ) && isset( $sentimentos[ $sentimento ] ) ) : ?>
-			<span class="cmp-sentimento"><?php echo esc_html( $sentimentos[ $sentimento ] ); ?></span>
-		<?php endif; ?>
+		<div class="cmp-avaliacao-info">
+			<?php if ( '' !== $nota ) : ?>
+				<span class="cmp-nota">⭐ Nota: <strong><?php echo esc_html( $nota ); ?>/10</strong></span>
+			<?php endif; ?>
 
-		<?php if ( ! empty( $status ) && isset( $status_list[ $status ] ) ) : ?>
-			<span class="cmp-status">Status: <strong><?php echo esc_html( $status_list[ $status ] ); ?></strong></span>
-		<?php endif; ?>
+			<?php if ( ! empty( $sentimento ) && isset( $sentimentos[ $sentimento ] ) ) : ?>
+				<span class="cmp-sentimento"><?php echo esc_html( $sentimentos[ $sentimento ] ); ?></span>
+			<?php endif; ?>
 
-		<?php if ( ! empty( $data_inicio ) ) : ?>
-			<span class="cmp-data">Início: <?php echo esc_html( date_i18n( 'd/m/Y', strtotime( $data_inicio ) ) ); ?></span>
-		<?php endif; ?>
+			<?php if ( ! empty( $status ) && isset( $status_list[ $status ] ) ) : ?>
+				<span class="cmp-status">Status: <strong><?php echo esc_html( $status_list[ $status ] ); ?></strong></span>
+			<?php endif; ?>
 
-		<?php if ( ! empty( $data_fim ) ) : ?>
-			<span class="cmp-data">Fim: <?php echo esc_html( date_i18n( 'd/m/Y', strtotime( $data_fim ) ) ); ?></span>
-		<?php endif; ?>
+			<?php if ( ! empty( $data_inicio ) ) : ?>
+				<span class="cmp-data">Início: <?php echo esc_html( date_i18n( 'd/m/Y', strtotime( $data_inicio ) ) ); ?></span>
+			<?php endif; ?>
+
+			<?php if ( ! empty( $data_fim ) ) : ?>
+				<span class="cmp-data">Fim: <?php echo esc_html( date_i18n( 'd/m/Y', strtotime( $data_fim ) ) ); ?></span>
+			<?php endif; ?>
+		</div>
 	</div>
 	<?php
-	$box = ob_get_clean();
+	return ob_get_clean();
+}
 
-	return $box . $content;
+function cmp_exibir_avaliacao_no_conteudo( $content ) {
+	if ( ! is_singular( CMP_POST_TYPE ) || ! in_the_loop() || ! is_main_query() ) {
+		return $content;
+	}
+
+	$post_id = get_the_ID();
+	$box     = cmp_montar_caixa_avaliacao( $post_id );
+	$posicao = get_option( 'cmp_posicao_avaliacao', 'depois' );
+
+	if ( 'antes' === $posicao ) {
+		return $box . $content;
+	}
+
+	return $content . $box;
 }
 add_filter( 'the_content', 'cmp_exibir_avaliacao_no_conteudo' );
 
 /**
  * ===========================================================
- * 5. CSS BÁSICO (funciona em qualquer tema)
+ * 6. CSS BÁSICO (funciona em qualquer tema)
  * ===========================================================
  */
 function cmp_enqueue_estilos() {
@@ -330,16 +417,30 @@ function cmp_enqueue_estilos() {
 	.cmp-avaliacao-box {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 10px 16px;
+		gap: 16px;
 		align-items: center;
 		background: #f7f7f7;
 		border: 1px solid #e0e0e0;
 		border-radius: 6px;
-		padding: 10px 14px;
-		margin-bottom: 20px;
+		padding: 14px;
+		margin: 20px 0;
 		font-size: 14px;
 	}
-	.cmp-avaliacao-box span { white-space: nowrap; }
+	.cmp-avaliacao-capa img {
+		width: 100px;
+		height: auto;
+		border-radius: 4px;
+		display: block;
+		box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+	}
+	.cmp-avaliacao-info {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 10px 16px;
+		align-items: center;
+		flex: 1;
+	}
+	.cmp-avaliacao-info span { white-space: nowrap; }
 
 	.cmp-widget-lista { list-style: none; margin: 0; padding: 0; }
 	.cmp-widget-item {
@@ -371,7 +472,7 @@ add_action( 'wp_enqueue_scripts', 'cmp_enqueue_estilos' );
 
 /**
  * ===========================================================
- * 6. WIDGET DE SIDEBAR: "Em andamento agora"
+ * 7. WIDGET DE SIDEBAR: "Em andamento agora"
  * ===========================================================
  * Mostra os itens com status "Em andamento" (lendo/assistindo),
  * ordenados pela data de início mais recente primeiro.
