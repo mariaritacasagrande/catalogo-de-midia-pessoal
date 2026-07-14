@@ -44,4 +44,4 @@ Plugin para WordPress que permite cadastrar filmes, livros e séries como posts 
    - Data de início e/ou término
 5. Publique o item normalmente.
 
-O item ficará acessível publicamente em uma URL como:
+O item ficará acessível publicamente em uma URL como:https://seu.blog/catalogo/nome-do-item/
